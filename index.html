@@ -227,7 +227,42 @@ select:focus,input[type=date]:focus{border-color:var(--accent);}
           <div class="chart-wrap" style="margin-top:10px;"><canvas id="chartMetaTrend"></canvas></div>
         </div>
       </div>
-      <div class="chart-card"><div class="chart-card-title">Meta — Campaign Detail</div><div id="tbMeta" style="margin-top:8px;"></div></div>
+
+      <!-- 4 BREAKDOWN TABLES -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div class="chart-card-title">📣 By Campaign</div>
+        <div id="tbMetaCampaign" style="margin-top:8px;overflow-x:auto;"></div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div class="chart-card-title">📦 By List Product</div>
+        <div id="tbMetaProduct" style="margin-top:8px;overflow-x:auto;"></div>
+      </div>
+
+      <!-- LIST PRODUCT TREND BY MONTH -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div class="trend-header">
+          <div class="chart-card-title" style="margin-bottom:0;">📦 List Product — So sánh theo tháng</div>
+          <div class="metric-tabs">
+            <button class="metric-tab active" onclick="setProductMetric('revenue',this)">Revenue</button>
+            <button class="metric-tab" onclick="setProductMetric('spend',this)">Spend</button>
+            <button class="metric-tab" onclick="setProductMetric('conversions',this)">Purchases</button>
+            <button class="metric-tab" onclick="setProductMetric('roas',this)">ROAS</button>
+          </div>
+        </div>
+        <div style="position:relative;height:260px;margin-top:14px;"><canvas id="chartProductMonth"></canvas></div>
+      </div>
+
+      <div class="chart-grid-2">
+        <div class="chart-card">
+          <div class="chart-card-title">👥 By Audience</div>
+          <div id="tbMetaAudience" style="margin-top:8px;overflow-x:auto;"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">✍️ By Angle Content</div>
+          <div id="tbMetaAngle" style="margin-top:8px;overflow-x:auto;"></div>
+        </div>
+      </div>
     </div>
 
     <!-- PAGE: GOOGLE DETAIL -->
@@ -251,7 +286,7 @@ const SHEET_ID = '1q8PNFy0nhTSvJJweL5HvHHEcothg6dbn1geM0gKcjUY';
 const CFG = {
   meta: {
     sheetName:'Raw_Data_Meta ads', label:'Meta Ads', color:'#1877f2',
-    cols:{DAY:'Day',CAMPAIGN:'Campaign name',CAMP_TYPE:'Campaign Type',SPEND:'Amount spent (VND)',IMPRESSIONS:'Impressions',CLICKS:'Link clicks',CONVERSIONS:'Purchases with shared items',REVENUE:'Purchases conversion value for shared items only',ADD_TO_CART:'Adds to cart with shared items'},
+    cols:{DAY:'Day',CAMPAIGN:'Campaign name',CAMP_TYPE:'Campaign Type',CAMPAIGN_GRP:'Campaign',LIST_PRODUCT:'List Product',GOAL:'Goal',AUDIENCE:'Audience',AD_FORMAT:'Ad format',ANGLE:'Angle Content',SPEND:'Amount spent (VND)',IMPRESSIONS:'Impressions',CLICKS:'Link clicks',CONVERSIONS:'Purchases with shared items',REVENUE:'Purchases conversion value for shared items only',ADD_TO_CART:'Adds to cart with shared items'},
     trendMetrics:['spend','revenue','clicks','conversions'], trendLabels:['Spend','Revenue','Clicks','Purchases'],
   },
   google: {
@@ -295,6 +330,12 @@ function parseCSV(text,cols,platform) {
     return {
       platform, day:(c[idx.DAY]||'').trim(), campaign:(c[idx.CAMPAIGN]||'').trim(),
       campType:(c[idx.CAMP_TYPE]||'').trim(),
+      campaignGrp:idx.CAMPAIGN_GRP>=0?(c[idx.CAMPAIGN_GRP]||'').trim():'',
+      listProduct:idx.LIST_PRODUCT>=0?(c[idx.LIST_PRODUCT]||'').trim():'',
+      goal:idx.GOAL>=0?(c[idx.GOAL]||'').trim():'',
+      audience:idx.AUDIENCE>=0?(c[idx.AUDIENCE]||'').trim():'',
+      adFormat:idx.AD_FORMAT>=0?(c[idx.AD_FORMAT]||'').trim():'',
+      angle:idx.ANGLE>=0?(c[idx.ANGLE]||'').trim():'',
       spend:num(c[idx.SPEND]),impressions:num(c[idx.IMPRESSIONS]),clicks:num(c[idx.CLICKS]),
       conversions:num(c[idx.CONVERSIONS]),revenue:num(c[idx.REVENUE]),addToCart:idx.ADD_TO_CART>=0?num(c[idx.ADD_TO_CART]):0,
     };
@@ -470,6 +511,8 @@ function renderCampaign(all){
 }
 
 // ── META DETAIL ──────────────────────────────────────
+let productMetric = 'revenue';
+
 function renderMetaDetail(meta){
   const t=sum(meta);const roas=t.spend>0?t.revenue/t.spend:0;
   document.getElementById('sc-meta').innerHTML=buildSC(t,roas,'Meta');
@@ -477,10 +520,109 @@ function renderMetaDetail(meta){
   const cfg=CFG.meta;
   document.getElementById('metaTabs').innerHTML=cfg.trendMetrics.map((m,i)=>`<button class="metric-tab${m===metaTrend?' active':''}" onclick="setMetaTrend('${m}',this)">${cfg.trendLabels[i]}</button>`).join('');
   renderPlatformTrend('chartMetaTrend','metaTrend',meta,metaTrend,'#1877f2');
-  const camps=groupBy(meta,'campaign').sort((a,b)=>b.spend-a.spend);
-  document.getElementById('tbMeta').innerHTML=buildCampTable(camps,'purchases');
+
+  // 4 breakdown tables
+  renderMetaBreakdown('campaign', meta, 'tbMetaCampaign');
+  renderMetaBreakdown('listProduct', meta, 'tbMetaProduct');
+  renderMetaBreakdown('audience', meta, 'tbMetaAudience');
+  renderMetaBreakdown('angle', meta, 'tbMetaAngle');
+
+  // List Product by Month chart
+  renderProductByMonth(meta);
 }
+
 function setMetaTrend(m,btn){metaTrend=m;document.querySelectorAll('#page-meta .metric-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPlatformTrend('chartMetaTrend','metaTrend',getFiltered(getRows('meta')),metaTrend,'#1877f2');}
+
+function setProductMetric(m,btn){
+  productMetric=m;
+  document.querySelectorAll('#chartProductMonth').forEach(()=>{});
+  // Only update the product month chart tabs
+  const tabs=document.querySelectorAll('#page-meta .chart-card:nth-of-type(4) .metric-tab');
+  tabs.forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderProductByMonth(getFiltered(getRows('meta')));
+}
+
+function renderMetaBreakdown(groupKey, rows, containerId){
+  const grouped = groupBy(rows, groupKey).sort((a,b)=>b.spend-a.spend);
+  if(!grouped.length){document.getElementById(containerId).innerHTML='<div class="no-data">Không có dữ liệu</div>';return;}
+
+  const tableRows = grouped.map(d=>{
+    const roasV = d.spend>0?d.revenue/d.spend:0;
+    const cr = d.clicks>0?(d.conversions/d.clicks*100):0;
+    const cpc = d.clicks>0?d.spend/d.clicks:0;
+    return `<tr>
+      <td class="bd-key" title="${d.key}">${d.key||'(trống)'}</td>
+      <td class="num">${fVND(d.spend)}đ</td>
+      <td class="num">${fNum(d.clicks)}</td>
+      <td class="num">${fNum(d.conversions)}</td>
+      <td class="num">${fVND(d.revenue)}đ</td>
+      <td class="num">${cr.toFixed(2)}%</td>
+      <td class="num ${roasClass(roasV)}">${fRoas(roasV)}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById(containerId).innerHTML=`
+    <table class="bd-table">
+      <thead><tr>
+        <th>Tên</th>
+        <th class="num">Amount Spent</th>
+        <th class="num">Link Clicks</th>
+        <th class="num">Purchases</th>
+        <th class="num">Purchase Value</th>
+        <th class="num">CR (Pur/Click)</th>
+        <th class="num">ROAS</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>`;
+}
+
+function renderProductByMonth(rows){
+  // Group by listProduct + month
+  const products = [...new Set(rows.map(r=>r.listProduct).filter(Boolean))].sort();
+  const months   = [...new Set(rows.map(r=>r.day.slice(0,7)).filter(Boolean))].sort();
+
+  // Build matrix: product -> month -> metrics
+  const matrix = {};
+  rows.forEach(r=>{
+    const p=r.listProduct||'(trống)', m=r.day.slice(0,7);
+    if(!matrix[p])matrix[p]={};
+    if(!matrix[p][m])matrix[p][m]={spend:0,clicks:0,conversions:0,revenue:0};
+    matrix[p][m].spend+=r.spend; matrix[p][m].clicks+=r.clicks;
+    matrix[p][m].conversions+=r.conversions; matrix[p][m].revenue+=r.revenue;
+  });
+
+  const colors=['#1877f2','#ea4335','#34a853','#fbbc05','#9c27b0','#ff5722','#00bcd4','#795548'];
+
+  dc('productMonth');
+  charts.productMonth=new Chart(document.getElementById('chartProductMonth'),{
+    type:'bar',
+    data:{
+      labels:months,
+      datasets: products.slice(0,8).map((p,i)=>({
+        label:p,
+        data:months.map(m=>{
+          const d=matrix[p]?.[m];
+          if(!d)return 0;
+          if(productMetric==='roas')return d.spend>0?+(d.revenue/d.spend).toFixed(2):0;
+          return d[productMetric]||0;
+        }),
+        backgroundColor:colors[i%colors.length]+'99',
+        borderColor:colors[i%colors.length],
+        borderWidth:1,
+        borderRadius:3,
+      }))
+    },
+    options:{
+      plugins:{legend:{position:'top',labels:{font:{size:10},boxWidth:12}}},
+      scales:{
+        y:{ticks:{callback:v=>productMetric==='spend'||productMetric==='revenue'?fVND(v):productMetric==='roas'?v+'x':fNum(v),font:{size:9}},grid:{color:'#f0f0f0'},stacked:false},
+        x:{ticks:{font:{size:9}},grid:{display:false}}
+      },
+      responsive:true,maintainAspectRatio:false
+    }
+  });
+}
 
 // ── GOOGLE DETAIL ────────────────────────────────────
 function renderGoogleDetail(google){
